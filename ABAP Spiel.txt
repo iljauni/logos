@@ -1,0 +1,523 @@
+*&---------------------------------------------------------------------*
+*& Report Z_00_101_HELLOWORLD
+*&---------------------------------------------------------------------*
+*& Logo-Quiz mit Startbildschirm
+*& - HTML/JS im Browser
+*& - Parallele Spiellogik in ABAP (für fachliche Darstellung)
+*&---------------------------------------------------------------------*
+REPORT z_00_101_helloworld.
+
+"---------------------------------------------------------------
+" Globale Daten (für ABAP-Spiellogik, nicht zwingend für JS)
+"---------------------------------------------------------------
+TYPES: BEGIN OF ty_logo,
+         name       TYPE string,
+       END OF ty_logo.
+
+DATA: gt_logos TYPE STANDARD TABLE OF ty_logo,
+      gv_max_points_per_logo TYPE i VALUE 100,
+      gv_min_points_per_logo TYPE i VALUE 25,
+      gv_max_hints           TYPE i VALUE 3,
+      gv_current_index       TYPE i,
+      gv_hint_count          TYPE i,
+      gv_total_score         TYPE i.
+
+DATA lv_html TYPE string.
+
+" Kannst du nutzen, um z. B. Hinweise/Punkte im Selektionsbild zu steuern
+PARAMETERS p_hints  TYPE i DEFAULT 3 NO-DISPLAY.
+PARAMETERS p_points TYPE i DEFAULT 100 NO-DISPLAY.
+
+"---------------------------------------------------------------
+" Einstiegslogik
+"---------------------------------------------------------------
+START-OF-SELECTION.
+  PERFORM init_data_abap_logic.
+  PERFORM build_html.
+  cl_abap_browser=>show_html(
+    EXPORTING
+      html_string = lv_html
+      title       = 'Logo-Quiz' ).
+
+"---------------------------------------------------------------
+" ABAP: Logodaten & Grundzustand (nur fachlich)
+"---------------------------------------------------------------
+FORM init_data_abap_logic.
+
+  DATA ls_logo TYPE ty_logo.
+
+  CLEAR gt_logos.
+
+  ls_logo-name = 'BMW'.
+  APPEND ls_logo TO gt_logos.
+
+  ls_logo-name = 'Amazon'.
+  APPEND ls_logo TO gt_logos.
+
+  ls_logo-name = 'Bacardi'.
+  APPEND ls_logo TO gt_logos.
+
+  ls_logo-name = 'Bic'.
+  APPEND ls_logo TO gt_logos.
+
+  ls_logo-name = 'BigBlueButton'.
+  APPEND ls_logo TO gt_logos.
+
+  ls_logo-name = 'Bundesliga'.
+  APPEND ls_logo TO gt_logos.
+
+  ls_logo-name = 'Chanel'.
+  APPEND ls_logo TO gt_logos.
+
+  ls_logo-name = 'HSV'.
+  APPEND ls_logo TO gt_logos.
+
+  ls_logo-name = 'Hyundai'.
+  APPEND ls_logo TO gt_logos.
+
+  ls_logo-name = 'Maserati'.
+  APPEND ls_logo TO gt_logos.
+
+  ls_logo-name = 'Nissan'.
+  APPEND ls_logo TO gt_logos.
+
+  ls_logo-name = 'SAP'.
+  APPEND ls_logo TO gt_logos.
+
+  " Grundeinstellungen aus Parametern übernehmen (nur ABAP-Sicht)
+  IF p_hints > 0.
+    gv_max_hints = p_hints.
+  ENDIF.
+
+  IF p_points > 0.
+    gv_max_points_per_logo = p_points.
+  ENDIF.
+
+  gv_min_points_per_logo = 25. " Mindestpunkte
+
+  gv_current_index = 1.
+  gv_hint_count    = 0.
+  gv_total_score   = 0.
+
+ENDFORM.
+
+"---------------------------------------------------------------
+" ABAP: Hinweislogik (fachliches Gegenstück zu useHint())
+"---------------------------------------------------------------
+FORM use_hint_abap.
+  IF gv_hint_count < gv_max_hints.
+    gv_hint_count = gv_hint_count + 1.
+  ENDIF.
+ENDFORM.
+
+"---------------------------------------------------------------
+" ABAP: Punkteberechnung (fachliches Gegenstück zu calculatePointsJS)
+"---------------------------------------------------------------
+FORM calculate_points_abap
+  USING
+    iv_hint_count TYPE i
+  CHANGING
+    cv_points     TYPE i.
+
+  DATA lv_points TYPE i.
+
+  lv_points = gv_max_points_per_logo - ( iv_hint_count * 25 ).
+
+  IF lv_points < gv_min_points_per_logo.
+    lv_points = gv_min_points_per_logo.
+  ENDIF.
+
+  cv_points = lv_points.
+
+ENDFORM.
+
+"---------------------------------------------------------------
+" ABAP: Antwort prüfen (fachliches Gegenstück zu checkAnswer())
+"---------------------------------------------------------------
+FORM check_answer_abap
+  USING
+    iv_answer   TYPE string
+  CHANGING
+    cv_correct  TYPE abap_bool
+    cv_points   TYPE i.
+
+  DATA: lv_answer_clean TYPE string,
+        lv_correct_name TYPE string,
+        ls_logo         TYPE ty_logo.
+
+  CLEAR: cv_correct, cv_points.
+
+  READ TABLE gt_logos INTO ls_logo INDEX gv_current_index.
+  IF sy-subrc <> 0.
+    RETURN.
+  ENDIF.
+
+  lv_answer_clean = iv_answer.
+  TRANSLATE lv_answer_clean TO LOWER CASE.
+  CONDENSE lv_answer_clean NO-GAPS.
+
+  lv_correct_name = ls_logo-name.
+  TRANSLATE lv_correct_name TO LOWER CASE.
+  CONDENSE lv_correct_name NO-GAPS.
+
+  IF lv_answer_clean IS INITIAL.
+    cv_correct = abap_false.
+    RETURN.
+  ENDIF.
+
+  IF lv_answer_clean = lv_correct_name.
+    cv_correct = abap_true.
+    PERFORM calculate_points_abap USING gv_hint_count CHANGING cv_points.
+    gv_total_score = gv_total_score + cv_points.
+  ELSE.
+    cv_correct = abap_false.
+  ENDIF.
+
+ENDFORM.
+
+"---------------------------------------------------------------
+" HTML/JS aufbauen
+"---------------------------------------------------------------
+FORM build_html.
+
+  DATA(lv_crlf) = cl_abap_char_utilities=>cr_lf.
+
+  CONCATENATE
+    '<!DOCTYPE html>'
+    '<html>'
+    '<head>'
+    '<meta charset="UTF-8">'
+    '<title>Logo-Quiz</title>'
+    '<style>'
+    '  body {'
+    '    font-family: Arial, sans-serif;'
+    '    text-align: center;'
+    '    margin: 20px;'
+    '    background: #f4f4f4;'
+    '  }'
+    '  #startScreen {'
+    '    margin-top: 100px;'
+    '  }'
+    '  #startButton {'
+    '    padding: 20px 40px;'
+    '    font-size: 20px;'
+    '    background: #0070b1;'
+    '    color: white;'
+    '    border: none;'
+    '    border-radius: 10px;'
+    '    cursor: pointer;'
+    '  }'
+    '  #gameArea { display: none; }'
+    '  h1 { margin-bottom: 10px; }'
+    '  #score { font-weight: bold; margin-bottom: 10px; }'
+    '  #pointsInfo { margin-bottom: 10px; font-style: italic; }'
+    '  #logo-container {'
+    '    margin: 20px auto; padding: 20px; background: #ffffff;'
+    '    border-radius: 10px; box-shadow: 0 0 10px rgba(0,0,0,0.1); max-width: 500px;'
+    '  }'
+    '  #logo { max-width: 400px; max-height: 300px; }'
+    '  #controls button { margin: 5px; padding: 8px 14px; border-radius: 6px; border: none; cursor: pointer; }'
+    '  #answer { padding: 6px; width: 250px; margin-top: 10px; }'
+    '  .btn-main { background: #0070b1; color: #ffffff; }'
+    '  .btn-hint { background: #ff9800; color: #ffffff; }'
+    '  .btn-nav  { background: #9e9e9e; color: #ffffff; }'
+    '</style>'
+    '</head>'
+    INTO lv_html SEPARATED BY lv_crlf.
+
+  CONCATENATE
+    lv_html
+    '<body>'
+
+    '<!-- STARTSCREEN -->'
+    '<div id="startScreen">'
+    '  <h1>Logo-Quiz</h1>'
+    '  <button id="startButton" onclick="startGame()">Spiel starten</button>'
+    '</div>'
+
+    '<!-- GAME AREA -->'
+    '<div id="gameArea">'
+    '  <h1>Logo-Quiz</h1>'
+    '  <div id="score">Score: 0 Punkte</div>'
+    '  <div id="pointsInfo"></div>'
+    '  <div id="logo-container">'
+    '    <img id="logo" src="" alt="Logo"/>'
+    '  </div>'
+    '  <input id="answer" type="text" placeholder="Firmenname / Marke eingeben" />'
+    '  <div id="message"></div>'
+    '  <div id="statusline"></div>'
+    '  <div id="controls">'
+    '    <button class="btn-main" onclick="checkAnswer()">Prüfen</button>'
+    '    <button class="btn-hint" onclick="useHint()">Hinweis</button>'
+    '    <button class="btn-nav" onclick="prevLogo()">◀ Zurück</button>'
+    '    <button class="btn-nav" onclick="nextLogo()">Weiter ▶</button>'
+    '  </div>'
+    '</div>'
+
+    '<script>'
+    INTO lv_html SEPARATED BY lv_crlf.
+
+  " --- LOGO DATEN (JS) ---
+  CONCATENATE
+    lv_html
+    '  var logos = ['
+    '    {'
+    '      name: "BMW",'
+    '      images: ['
+    '        "https://iljauni.github.io/logos/BMW_blur_3.png",'
+    '        "https://iljauni.github.io/logos/BMW_blur_2.png",'
+    '        "https://iljauni.github.io/logos/BMW_blur_1.png",'
+    '        "https://iljauni.github.io/logos/BMW_logo_normal.png"'
+    '      ], solved: false, points: 0, hintsUsed: 0'
+    '    },'
+    '    {'
+    '      name: "Amazon",'
+    '      images: ['
+    '        "https://iljauni.github.io/logos/amazon_blur_3.png",'
+    '        "https://iljauni.github.io/logos/amazon_blur_2.png",'
+    '        "https://iljauni.github.io/logos/amazon_blur_1.png",'
+    '        "https://iljauni.github.io/logos/amazon_logo_normal.jpg"'
+    '      ], solved: false, points: 0, hintsUsed: 0'
+    '    },'
+    '    {'
+    '      name: "Bacardi",'
+    '      images: ['
+    '        "https://iljauni.github.io/logos/bacardi_blur_3.png",'
+    '        "https://iljauni.github.io/logos/bacardi_blur_2.png",'
+    '        "https://iljauni.github.io/logos/bacardi_blur_1.png",'
+    '        "https://iljauni.github.io/logos/bacardi_normal.png"'
+    '      ], solved: false, points: 0, hintsUsed: 0'
+    '    },'
+    '    {'
+    '      name: "Bix",'
+    '      images: ['
+    '        "https://iljauni.github.io/logos/bic_blur_3.png",'
+    '        "https://iljauni.github.io/logos/bic_blur_2.png",'
+    '        "https://iljauni.github.io/logos/bic_blur_1.png",'
+    '        "https://iljauni.github.io/logos/bic_normal.png"'
+    '      ], solved: false, points: 0, hintsUsed: 0'
+    '    },'
+    '    {'
+    '      name: "BigBlueButton",'
+    '      images: ['
+    '        "https://iljauni.github.io/logos/bigbluebutton_blur_3.png",'
+    '        "https://iljauni.github.io/logos/bigbluebutton_blur_2.png",'
+    '        "https://iljauni.github.io/logos/bigbluebutton_blur_1.png",'
+    '        "https://iljauni.github.io/logos/bigbluebutton_normal.png"'
+    '      ], solved: false, points: 0, hintsUsed: 0'
+    '    },'
+    '    {'
+    '      name: "Bundesliga",'
+    '      images: ['
+    '        "https://iljauni.github.io/logos/bundesliga_blur_3.png",'
+    '        "https://iljauni.github.io/logos/bundesliga_blur_2.png",'
+    '        "https://iljauni.github.io/logos/bundesliga_blur_1.png",'
+    '        "https://iljauni.github.io/logos/bundesliga_normal.png"'
+    '      ], solved: false, points: 0, hintsUsed: 0'
+    '    },'
+    '    {'
+    '      name: "Chanel",'
+    '      images: ['
+    '        "https://iljauni.github.io/logos/chanel_blur_3.png",'
+    '        "https://iljauni.github.io/logos/chanel_blur_2.png",'
+    '        "https://iljauni.github.io/logos/chanel_blur_1.png",'
+    '        "https://iljauni.github.io/logos/chanel_normal.png"'
+    '      ], solved: false, points: 0, hintsUsed: 0'
+    '    },'
+    '    {'
+    '      name: "HSV",'
+    '      images: ['
+    '        "https://iljauni.github.io/logos/hsv_blur_3.png",'
+    '        "https://iljauni.github.io/logos/hsv_blur_2.png",'
+    '        "https://iljauni.github.io/logos/hsv_blur_1.png",'
+    '        "https://iljauni.github.io/logos/hsv_normal.png"'
+    '      ], solved: false, points: 0, hintsUsed: 0'
+    '    },'
+    '    {'
+    '      name: "Hyundai",'
+    '      images: ['
+    '        "https://iljauni.github.io/logos/hyundai_blur_3.png",'
+    '        "https://iljauni.github.io/logos/hyundai_blur_2.png",'
+    '        "https://iljauni.github.io/logos/hyundai_blur_1.png",'
+    '        "https://iljauni.github.io/logos/hyundai_normal.png"'
+    '      ], solved: false, points: 0, hintsUsed: 0'
+    '    },'
+    '    {'
+    '      name: "Maserati",'
+    '      images: ['
+    '        "https://iljauni.github.io/logos/maserati_blur_3.png",'
+    '        "https://iljauni.github.io/logos/maserati_blur_2.png",'
+    '        "https://iljauni.github.io/logos/maserati_blur_1.png",'
+    '        "https://iljauni.github.io/logos/maserati_normal.png"'
+    '      ], solved: false, points: 0, hintsUsed: 0'
+    '    },'
+    '    {'
+    '      name: "Nissan",'
+    '      images: ['
+    '        "https://iljauni.github.io/logos/nissan_blur_3.png",'
+    '        "https://iljauni.github.io/logos/nissan_blur_2.png",'
+    '        "https://iljauni.github.io/logos/nissan_blur_1.png",'
+    '        "https://iljauni.github.io/logos/nissan_normal.png"'
+    '      ], solved: false, points: 0, hintsUsed: 0'
+    '    },'
+    '    {'
+    '      name: "SAP",'
+    '      images: ['
+    '        "https://iljauni.github.io/logos/sap_blur_3.png",'
+    '        "https://iljauni.github.io/logos/sap_blur_2.png",'
+    '        "https://iljauni.github.io/logos/sap_blur_1.png",'
+    '        "https://iljauni.github.io/logos/sap_normal.png"'
+    '      ], solved: false, points: 0, hintsUsed: 0'
+    '    }'
+    '  ];'
+    INTO lv_html SEPARATED BY lv_crlf.
+
+  " --- JAVASCRIPT-LOGIK ---
+  CONCATENATE
+    lv_html
+
+    '  var currentIndex = 0;'
+    '  var hintCount = 0;'
+    '  var totalScore = 0;'
+    ''
+    '  function calculateCurrentPoints(hintsUsed) {'
+    '    var points = 100 - (hintsUsed * 25);'
+    '    if (points < 25) {'
+    '      points = 25;'
+    '    }'
+    '    return points;'
+    '  }'
+    ''
+    '  function updateScoreView() {'
+    '    document.getElementById("score").innerText = "Score: " + totalScore + " Punkte";'
+    '  }'
+    ''
+    '  function updatePointsInfo() {'
+    '    var logoObj = logos[currentIndex];'
+    '    var info = document.getElementById("pointsInfo");'
+    ''
+    '    if (!info) return;'
+    ''
+    '    if (logoObj.solved) {'
+    '      info.innerText = "Bereits gelöst: Du hast " + logoObj.points + " Punkte erhalten.";'
+    '    } else {'
+    '      var hints = logoObj.hintsUsed || 0;'
+    '      var points = calculateCurrentPoints(hints);'
+    '      info.innerText = "Wenn du dieses Logo jetzt richtig löst, bekommst du " + points + " Punkte.";'
+    '    }'
+    '  }'
+    ''
+    '  function startGame() {'
+    '    document.getElementById("startScreen").style.display = "none";'
+    '    document.getElementById("gameArea").style.display = "block";'
+    '    showLogo();'
+    '  }'
+    ''
+    '  function showLogo() {'
+    '    var logoObj = logos[currentIndex];'
+    '    var img = document.getElementById("logo");'
+    '    var answer = document.getElementById("answer");'
+    '    var msg = document.getElementById("message");'
+    '    var status = document.getElementById("statusline");'
+    ''
+    '    if (!logoObj.hintsUsed) {'
+    '      logoObj.hintsUsed = 0;'
+    '    }'
+    '    hintCount = logoObj.solved ? 3 : logoObj.hintsUsed;'
+    ''
+    '    var level = logoObj.solved ? 3 : hintCount;'
+    '    img.src = logoObj.images[level];'
+    ''
+    '    if (logoObj.solved) {'
+    '      answer.value = logoObj.name;'
+    '      answer.disabled = true;'
+    '      msg.innerText = "Bereits gelöst! +" + logoObj.points + " Punkte.";'
+    '    } else {'
+    '      answer.value = "";'
+    '      answer.disabled = false;'
+    '      msg.innerText = "";'
+    '    }'
+    ''
+    '    status.innerText = "Logo " + (currentIndex + 1) + " von " + logos.length;'
+    '    updatePointsInfo();'
+    '  }'
+    ''
+    '  function checkAnswer() {'
+    '    var logoObj = logos[currentIndex];'
+    '    var answerField = document.getElementById("answer");'
+    '    var msg = document.getElementById("message");'
+    ''
+    '    if (logoObj.solved) { msg.innerText = "Dieses Logo ist schon gelöst!"; return; }'
+    ''
+    '    var given = answerField.value.replace(/^\s+|\s+$/g, "").toLowerCase();'
+    '    var correct = logoObj.name.toLowerCase();'
+    ''
+    '    if (given === "") { msg.innerText = "Bitte etwas eingeben."; return; }'
+    ''
+    '    if (given === correct) {'
+    '      if (!logoObj.hintsUsed) {'
+    '        logoObj.hintsUsed = 0;'
+    '      }'
+    '      var points = calculateCurrentPoints(logoObj.hintsUsed);'
+    '      logoObj.solved = true;'
+    '      logoObj.points = points;'
+    '      totalScore += points;'
+    '      updateScoreView();'
+    '      msg.innerText = "Richtig! +" + points + " Punkte";'
+    '      answerField.disabled = true;'
+    '      hintCount = 3;'
+    '      showLogo();'
+    '    } else { msg.innerText = "Falsch — versuch es erneut!"; }'
+    '  }'
+    ''
+    '  function useHint() {'
+    '    var logoObj = logos[currentIndex];'
+    '    var msg = document.getElementById("message");'
+    ''
+    '    if (logoObj.solved) {'
+    '      msg.innerText = "Schon gelöst!";'
+    '      return;'
+    '    }'
+    ''
+    '    if (!logoObj.hintsUsed) {'
+    '      logoObj.hintsUsed = 0;'
+    '    }'
+    ''
+    '    if (logoObj.hintsUsed >= 3) {'
+    '      msg.innerText = "Keine Hinweise mehr.";'
+    '      return;'
+    '    }'
+    ''
+    '    logoObj.hintsUsed++;'
+    '    hintCount = logoObj.hintsUsed;'
+    '    showLogo();'
+    '  }'
+    ''
+    '  function nextLogo() {'
+    '    currentIndex++;'
+    '    if (currentIndex >= logos.length) currentIndex = 0;'
+    '    var logoObj = logos[currentIndex];'
+    '    if (!logoObj.hintsUsed) {'
+    '      logoObj.hintsUsed = 0;'
+    '    }'
+    '    hintCount = logoObj.solved ? 3 : logoObj.hintsUsed;'
+    '    showLogo();'
+    '  }'
+    ''
+    '  function prevLogo() {'
+    '    currentIndex--;'
+    '    if (currentIndex < 0) currentIndex = logos.length - 1;'
+    '    var logoObj = logos[currentIndex];'
+    '    if (!logoObj.hintsUsed) {'
+    '      logoObj.hintsUsed = 0;'
+    '    }'
+    '    hintCount = logoObj.solved ? 3 : logoObj.hintsUsed;'
+    '    showLogo();'
+    '  }'
+    ''
+    '</script>'
+    '</body>'
+    '</html>'
+    INTO lv_html SEPARATED BY lv_crlf.
+
+ENDFORM.
